@@ -85,6 +85,8 @@ function KeepOnlyNumbers (const aSource : String) : String;
 function KeepOnlyLetters (const aSource : String; const aUnderscoreForSpaces: boolean) : String;
 function KeepOnlyLettersAndNumbers (const aSource : String; const aUnderscoreForSpaces: boolean) : String;
 
+function ExtractSameLeftStringPart(const aList : TStringList): String;
+
 function ExtractLastFolderFromPath (aFullPath : string) : string;
 
 // https://forum.lazarus.freepascal.org/index.php/topic,33013.msg213197.html#msg213197
@@ -154,7 +156,7 @@ procedure RunConsoleApplicationAndGetOutput(const aCommand : string; const aPara
 implementation
 
 uses
-  DateUtils, base64, strutils, process,
+  DateUtils, base64, strutils, process, math,
   {$IFDEF WINDOWS}shlobj, registry, winutils,{$ELSE}LazUTF8,{$ENDIF}
   {$IFDEF LINUX}initc, ctypes, BaseUnix,{$ENDIF}
   mMathUtility;
@@ -959,6 +961,31 @@ begin
   end;
 end;
 
+function ExtractSameLeftStringPart(const aList: TStringList): String;
+var
+  i, k, maxLength : integer;
+  curStr : String;
+begin
+  Result := '';
+  maxLength:= MaxInt;
+  for i := 0 to aList.Count -1 do
+    maxLength:= min(Length(aList.Strings[i]), maxLength);
+  for i := 1 to maxLength do
+  begin
+    curStr := LeftStr(aList.Strings[0], i);
+    for k := 1 to aList.Count -1 do
+    begin
+      if not SameStr(curStr, LeftStr(aList.Strings[k], i)) then
+      begin
+        if i > 1 then
+          Result := LeftStr(aList.Strings[0], i -1);
+        exit;
+      end;
+    end;
+  end;
+  Result := LeftStr(aList.Strings[0], maxLength);
+end;
+
 function ExtractLastFolderFromPath(aFullPath: string): string;
 var
   tmp : TStringList;
@@ -1387,6 +1414,7 @@ var
   AppDataPath: Array[0..MaxPathLen] of Char; //http://wiki.lazarus.freepascal.org/Windows_Programming_Tips
   {$ENDIF}
 begin
+  Result := '';
   {$IFDEF WINDOWS}
   AppDataPath:='';
   SHGetSpecialFolderPath(0,AppDataPath,CSIDL_APPDATA,false);
