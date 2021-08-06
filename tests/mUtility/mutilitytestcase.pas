@@ -21,6 +21,7 @@ type
     procedure TestISO6346MRNs;
     procedure TestHumanReadableUniqueIdentifiers;
     procedure TestEncodeDecodeTimestampForFilename;
+    procedure TestEscapeString;
   end;
 
 implementation
@@ -291,6 +292,16 @@ begin
   CheckEquals(GetTimeStampForFileName(EncodeDateTime(2019,12,7, 0, 0, 0, 0)), '20191207-000000');
   CheckEquals(DecodeTimeStampForFileName('20191207-000000'), EncodeDateTime(2019,12,7, 0, 0, 0, 0));
 
+end;
+
+procedure TTestCaseUtility.TestEscapeString;
+begin
+  CheckEquals('\/\\', RevertEscapedStringValue(EscapeStringValue('\/\\', 'json'), 'json'));
+  CheckEquals('''green'' is the new "black_"', RevertEscapedStringValue(EscapeStringValue('''green'' is the new "black_"', 'sql'), 'sql'));
+  CheckEquals('top' + Chr(9), RevertEscapedStringValue(EscapeStringValue('top' + Chr(9), 'json'), 'json'));
+  CheckEquals('\\\\', RevertEscapedStringValue(EscapeStringValue('\\\\', 'json'), 'json'));
+  CheckEquals('____O O_____', RevertEscapedStringValue(EscapeStringValue('____O O_____', 'json'), 'json'));
+  CheckEquals('\\myserver\dir\dir2\pippo.txt', RevertEscapedStringValue(EscapeStringValue('\\myserver\dir\dir2\pippo.txt', 'json'), 'json'));
 end;
 
 

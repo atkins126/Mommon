@@ -131,7 +131,10 @@ function EncodeURIComponent(const aSrc: String): UTF8String;
 
 function EncodeSVGString(const aSrc : String): String;
 
-function EscapeSQLStringValue(const aSrc: String): String;
+// https://docs.microsoft.com/it-it/sql/t-sql/functions/string-escape-transact-sql?view=sql-server-ver15
+// https://commons.apache.org/proper/commons-lang/javadocs/api-2.6/org/apache/commons/lang/StringEscapeUtils.html#escapeSql(java.lang.String)
+function EscapeStringValue(const aSrc: String; const aType: String): String;
+function RevertEscapedStringValue(const aSrc: String; const aType: String): String;
 
 // https://docs.microsoft.com/it-it/windows/desktop/FileIO/naming-a-file#basic_naming_conventions
 function SanitizeFileName(const aSrc: String) : String;
@@ -2142,45 +2145,124 @@ begin
   end;
 end;
 
-function EscapeSQLStringValue(const aSrc: String): String;
+function EscapeStringValue(const aSrc: String; const aType : String): String;
 var
   i : integer;
   curOrd : word;
 begin
-  Result := '';
-  for i := 1 to Length(aSrc) do
+  Result := aSrc;
+  if aType = 'json' then
   begin
-    // \n
-    // \b
-    // \r
-    // \\
-    // \%
-    // \_
-    // \t
-    // \'
-    // \"
-    curOrd:= Ord(aSrc[i]);
-    if curOrd = 10 then
-      Result := Result + '\n'
-    else if curOrd = 8 then
-      Result := Result + '\b'
-    else if curOrd = 13 then
-      Result := Result + '\r'
-    else if curOrd = 92 then
-      Result := Result + '\\'
-    else if curOrd = 37  then
-      Result := Result + '\%'
-    else if curOrd = 95 then
-      Result := Result + '\_'
-    else if curOrd = 9 then
-      Result := Result + '\t'
-    else if curOrd = 39 then
-      Result := Result + '\'''
-    else if curOrd = 34 then
-      Result := Result + '\"'
-    else
-      Result := Result + aSrc[i];
+    Result := '';
+    for i := 1 to Length(aSrc) do
+    begin
+      // \n
+      // \b
+      // \r
+      // \\
+      // \"
+      // \/
+      // \t
+      curOrd:= Ord(aSrc[i]);
+      if curOrd = 10 then
+        Result := Result + '\n'
+      else if curOrd = 8 then
+        Result := Result + '\b'
+      else if curOrd = 13 then
+        Result := Result + '\r'
+      else if curOrd = 92 then
+        Result := Result + '\\'
+      else if curOrd = 47 then
+        Result := Result + '\/'
+      else if curOrd = 9 then
+        Result := Result + '\t'
+      else if curOrd = 34 then
+        Result := Result + '\"'
+      else
+        Result := Result + aSrc[i];
+    end;
   end
+  else
+  if aType = 'sql' then
+  begin
+    Result := '';
+    for i := 1 to Length(aSrc) do
+    begin
+      curOrd:= Ord(aSrc[i]);
+      if curOrd = 39 then
+        Result := Result + ''''''
+      else
+        Result := Result + aSrc[i];
+    end;
+  end;
+end;
+
+function RevertEscapedStringValue(const aSrc: String; const aType : String): String;
+var
+  i : integer;
+  curStr : String;
+
+  procedure AddStr(var aResultStr : String; const aStr : String);
+  begin
+    aResultStr := aResultStr + aStr;
+    curStr := '';
+  end;
+begin
+  Result := aSrc;
+  if aType = 'json' then
+  begin
+    Result := '';
+    curStr := '';
+    for i := 1 to Length(aSrc) do
+    begin
+      curStr := curStr + aSrc[i];
+      // \n
+      // \b
+      // \r
+      // \\
+      // \t
+      // \"
+      if curStr = '\n' then
+        AddStr(Result, Chr(10))
+      else if curStr = '\b' then
+        AddStr(Result, Chr(8))
+      else if curStr = '\r' then
+        AddStr (Result, Chr(13))
+      else if curStr = '\\' then
+        AddStr(Result, Chr(92))
+      else if curStr = '\/' then
+        AddStr(Result, Chr(47))
+      else if curStr = '\t' then
+        AddStr(Result, Chr(9))
+      else if curStr = '\"' then
+        AddStr(Result, Chr(34))
+      else if Length(curStr) = 2 then
+      begin
+        Result := Result + curStr[1];
+        curStr := curStr[2];
+      end
+    end;
+    if curStr <> '' then
+      AddStr(Result, curStr);
+  end
+  else if aType = 'sql' then
+  begin
+    Result := '';
+    curStr := '';
+    for i := 1 to Length(aSrc) do
+    begin
+      curStr := curStr + aSrc[i];
+      if curStr = '''''' then
+        AddStr(Result, Chr(39))
+      else if Length(curStr) = 2 then
+      begin
+        Result := Result + curStr[1];
+        curStr := curStr[2];
+      end
+    end;
+    if curStr <> '' then
+      AddStr(Result, curStr);
+  end;
 end;
 
 (*
@@ -2228,7 +2310,11 @@ begin
   filename := ExtractFileName(aSrc);
   ext := ExtractFileExt(aSrc);
   filename := ChangeFileExt(filename, '');
-  Result := IncludeTrailingPathDelimiter(dir) + filename + aSuffix + ext;
+  if dir <> '' then
+    Result := IncludeTrailingPathDelimiter(dir)
+  else
+    Result := '';
+  Result := Result + filename + aSuffix + ext;
 end;
 
 procedure AddUTF8BOMToStream(aStream: TStream);
