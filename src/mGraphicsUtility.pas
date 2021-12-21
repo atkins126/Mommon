@@ -43,6 +43,9 @@ type
   function LighterColor(aColor: TColor; percent: Byte): TColor;
   function IsDark (const aColor: TColor): boolean;
 
+  // https://stackoverflow.com/questions/20129758/algorithm-to-randomly-generate-a-color-palette-in-delphi
+  function GenerateRandomColor(const Mix: TColor = clWhite): TColor;
+
   function ScaleForDPI (const aValue : integer) : integer;
 
 
@@ -63,7 +66,13 @@ type
 implementation
 
 uses
-  SysUtils, Math {$IFDEF FPC},graphutil{$ENDIF};
+  SysUtils, Math
+  {$IFDEF FPC}
+    ,graphutil
+  {$ELSE}
+    ,System.UIConsts, System.UITypes, Vcl.Imaging.pngimage
+  {$ENDIF}
+  ;
 
 {$IFDEF FPC}
 const
@@ -172,7 +181,7 @@ begin
     taRightJustify: TempFlags := DT_RIGHT;
     taCenter: TempFlags := DT_CENTER;
   end;
-  TempFlags := TempFlags or (DT_VCENTER + DT_SINGLELINE {$ifndef fpc}DT_WORD_ELLIPSIS{$endif});
+  TempFlags := TempFlags or (DT_VCENTER + DT_SINGLELINE {$ifndef fpc}+ DT_WORD_ELLIPSIS{$endif});
 
   tmpRect := aRect;
   if DrawText(aCanvas.Handle, PChar(aText), -1, tmpRect, TempFlags) = 0 then
@@ -180,7 +189,7 @@ begin
   {$ENDIF}
 end;
 
-
+{$IFDEF FPC}
   procedure RGBToHLS(aColor: TColor; var H, L, S: Double);
   var
     HW, SW, LW: Word;
@@ -214,6 +223,28 @@ end;
     luminance := Max(0, Min(luminance, 1));
     Result := HLSToRGB(H, luminance, S);
   end;
+
+{$ELSE}
+
+  function GetLuminance(aColor: TColor): double;
+  var
+    H, S, L: Single;
+  begin
+    RGBtoHSL(ColorToRgb(aColor), H, S, L);
+    Result := L;
+  end;
+
+  function SetLuminance(aColor: TColor; luminance: double): TColor;
+  var
+    H, S, L: Single;
+  begin
+    RGBtoHSL(ColorToRgb(aColor), H, S, L);
+    luminance := Max(0, Min(luminance, 1));
+    Result := HSLtoRGB(H, S, luminance);
+  end;
+
+{$ENDIF}
+
 
   function DarkerColor(aColor: TColor; percent: Byte): TColor;
   var
@@ -424,14 +455,18 @@ end;
 function GeneratePNGThumbnailOfImage(const aSourceFile, aThumbnailFile: String; const aMaxWidth, aMaxHeight: word;out aError: String): boolean;
 var
   sourcePicture : TPicture;
-  thumbnail : TPortableNetworkGraphic;
+  thumbnail : {$IFDEF FPC} TPortableNetworkGraphic {$ELSE} TPngImage {$ENDIF};
   rateWidth, rateHeight : Extended;
   r : TRect;
 begin
   Result := true;
   try
     sourcePicture := TPicture.Create;
+    {$IFDEF FPC}
     thumbnail := TPortableNetworkGraphic.Create;
+    {$ELSE}
+    thumbnail := TPngImage.Create;
+    {$ENDIF}
     try
       sourcePicture.LoadFromFile(aSourceFile);
       rateWidth := aMaxWidth / sourcePicture.Width;
@@ -442,7 +477,9 @@ begin
       thumbnail.Canvas.Brush.Color:= clWhite;
       r := Rect(0, 0, thumbnail.Width, thumbnail.Height);
       thumbnail.Canvas.FillRect(r);
+      {$IFDEF FPC}
       thumbnail.Canvas.AntialiasingMode := amON;
+      {$ENDIF}
       thumbnail.Canvas.StretchDraw(r, sourcePicture.Graphic);
       thumbnail.SaveToFile(aThumbnailFile);
     finally
@@ -456,6 +493,21 @@ begin
       Result := false;
     end;
   end;
+end;
+
+// https://stackoverflow.com/questions/20129758/algorithm-to-randomly-generate-a-color-palette-in-delphi
+function GenerateRandomColor(const Mix: TColor = clWhite): TColor;
+var
+  Red, Green, Blue: Integer;
+begin
+  Red := Random(256);
+  Green := Random(256);
+  Blue := Random(256);
+
+  Red := (Red + GetRValue(ColorToRGB(Mix))) div 2;
+  Green := (Green + GetGValue(ColorToRGB(Mix))) div 2;
+  Blue := (Blue + GetBValue(ColorToRGB(Mix))) div 2;
+  Result := RGB(Red, Green, Blue);
 end;
 
 
