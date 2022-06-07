@@ -39,6 +39,7 @@ type
     FUseFTPS : boolean;
     FSSLIoHandler: TIdSSLIOHandlerSocketOpenSSL;
     function ExtractTypeAndName (const aSourceString : string; out aFileType : TFTPFileType; out aFileName : string) : boolean;
+    function ExistsFolder (aFTPClient : TIdFTP; const aPath: string) : boolean;
     procedure InternalCreateSubFolders(aFTPClient : TIdFTP; const aPath: string);
     function GetFTPParentPath(const aPath : String): String;
     function GetFTPLastFolderInPath(const aPath : String): String;
@@ -83,9 +84,14 @@ type
 implementation
 
 uses
+  StrUtils,
   IdTCPClient, IdFTPCommon, IdReplyRFC, IdReplyFTP, IdExplicitTLSClientServerBase
   {$IFDEF LINUX},FileUtil, IdSSLOpenSSLHeaders{$ENDIF}
+  ,mLog, mMathUtility
   ;
+
+var
+  logger : TmLog;
 
 { TFTPFoldersListFileSystem }
 
@@ -111,11 +117,8 @@ var
   tmpFileName : string;
 begin
   aRoots.Clear;
-  FTPClient := TIdFTP.Create(nil);
+  FTPClient := CreateConnection;
   try
-    FTPClient.Host:= FHost;
-    FTPClient.Username:= FUsername;
-    FTPClient.Password:= FPassword;
     try
       FTPClient.Connect;
     except
@@ -160,7 +163,7 @@ end;
 
 { TFTPFileSystemManager }
 
-function TFTPFileSystemManager.ExtractTypeAndName(const aSourceString: string; out aFileType: TFTPFileType; out aFileName: string) : boolean;
+function FileZillaExtractTypeAndName(const aSourceString: string; out aFileType: TFTPFileType; out aFileName: string) : boolean;
 var
   tmp : TStringList;
 begin
@@ -193,6 +196,116 @@ begin
   end;
 end;
 
+function VsftdExtractTypeAndName(const aSourceString: string; out aFileType: TFTPFileType; out aFileName: string) : boolean;
+var
+  tmp : TStringList;
+  i, tmpInt : integer;
+  sep : String;
+begin
+  Result := false;
+
+  tmp := TStringList.Create;
+  try
+    ExtractStrings([' '], [], PChar(aSourceString), tmp, false);
+
+    if tmp.Count > 0 then
+    begin
+      if AnsiContainsText(tmp.Strings[0], 'r') then
+      begin
+        i := 1;
+        while (i <= (tmp.Count-1)) and (trim(tmp.Strings[i]) = '') do
+          inc(i);
+
+        if TryToConvertToInteger(tmp.Strings[i], tmpInt) then
+        begin
+          if tmpInt = 1 then
+            aFileType := ftFile
+          else if tmpInt = 2 then
+            aFileType := ftDir
+          else
+            exit;
+        end
+        else
+          exit;
+
+        i := tmp.Count - 1;
+        while (i >= 0) and (Length(tmp.Strings[i]) <> 5) and (Pos(':', tmp.Strings[i]) <> 3) and (not IsNumeric(LeftStr(tmp.Strings[i], 2), false, false)) and
+          (not IsNumeric(RightStr(tmp.Strings[i], 2), false, false)) do
+          dec(i);
+        inc (i);
+        if i < tmp.Count then
+        begin
+          aFileName := '';
+          sep := '';
+          while i <= tmp.Count -1 do
+          begin
+            aFileName := aFileName + sep + trim(tmp.Strings[i]);
+            sep := ' ';
+            inc (i);
+          end;
+          Result := true;
+        end;
+      end;
+    end;
+  finally
+    tmp.Free;
+  end;
+end;
+
+function TFTPFileSystemManager.ExtractTypeAndName(const aSourceString: string; out aFileType: TFTPFileType; out aFileName: string) : boolean;
+begin
+  Result := FileZillaExtractTypeAndName(aSourceString, aFileType, aFileName);
+
+  if Result then
+    exit;
+
+  Result := VsftdExtractTypeAndName(aSourceString, aFileType, aFileName);
+end;
+
+function TFTPFileSystemManager.ExistsFolder (aFTPClient : TIdFTP; const aPath: string) : boolean;
+begin
+  Result := false;
+
+  // this is ok for filezilla server:
+  try
+    aFTPClient.List(nil, aPath, false);
+    if aFTPClient.LastCmdResult.NumericCode = 450 then
+    begin
+      if Pos('no such', LowerCase(aFTPClient.LastCmdResult.Text.Text)) > 0 then //  has a message like 'No such file or directory' or similar)
+        exit;
+    end;
+  except
+    on e: EIdReplyRFCError do
+    begin
+      {$IFDEF DEBUG}
+      logger.Debug(IntToStr(e.ErrorCode) + ' ' + e.Message);
+      {$ENDIF}
+      if (e.ErrorCode <> 550) or (not AnsiContainsText(e.Message,'not found')) then
+        //(e.Message does not have a message like 'Directory not found' or similar) then begin
+        raise
+    end;
+  end;
+
+  // this works for vftpd:
+  try
+    aFTPClient.ChangeDir(PATH_DELIMITER);
+    aFTPClient.ChangeDir(aPath);
+  except
+    on e: EIdReplyRFCError do
+    begin
+      {$IFDEF DEBUG}
+      logger.Debug(IntToStr(e.ErrorCode) + ' ' + e.Message);
+      {$ENDIF}
+      if (e.ErrorCode = 550) then
+        exit
+      else
+        raise;
+    end
+    else
+      raise;
+  end;
+  Result := true;
+end;
 
 // https://www.howtobuildsoftware.com/index.php/how-do/bqWO/delphi-indy10-delphi-xe7-idftp-direxists-and-makedir
 procedure TFTPFileSystemManager.InternalCreateSubFolders(aFTPClient : TIdFTP; const aPath: string);
@@ -200,25 +313,7 @@ var
   dirExists : boolean;
   tmpFolder : String;
 begin
-  try
-    aFTPClient.List(nil, aPath, false);
-    dirExists := True;
-    if aFTPClient.LastCmdResult.NumericCode = 450 then
-    begin
-      if Pos('no such', LowerCase(aFTPClient.LastCmdResult.Text.Text)) > 0 then //  has a message like 'No such file or directory' or similar)
-        dirExists := false;
-    end;
-  except
-    on e: EIdReplyRFCError do
-    begin
-      if (e.ErrorCode <> 550) or
-        (Pos('not found', LowerCase(e.Message)) = 0) then
-        //(e.Message does not have a message like 'Directory not found' or similar) then begin
-        raise
-      else
-        dirExists := false;
-    end;
-  end;
+  dirExists:= ExistsFolder(aFTPClient, aPath);
 
   if not dirExists then
   begin
@@ -471,5 +566,8 @@ begin
       Result := aPath + TFTPFileSystemManager.PATH_DELIMITER;
   end;
 end;
+
+initialization
+  logger := logManager.AddLog('mVirtualFileSystem_FTP');
 
 end.
