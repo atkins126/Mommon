@@ -40,6 +40,8 @@ function IsUniqueIdentifier (const aUI : String): boolean;
 function CreateHumanReadableUniqueIdentier (const aLanguageCode : String): String; // a random unique identifier which is easy to be remembered, inspired by https://github.com/PerWiklander/IdentifierSentence
 {$ENDIF}
 
+function GetUniqueTemporaryFolder: string;
+
 procedure WordwrapStringByRows(const aSourceString : String; const aNumOfRows : integer; aRows : TStringList);
 
 function AddZerosFront (const aValue : integer; const aLength : integer) : String; overload;
@@ -64,6 +66,14 @@ function TryToUnderstandBooleanString(const aInputString : String; out aValue : 
 
 // http://users.atw.hu/delphicikk/listaz.php?id=2189&oldal=11
 function DateTimeStrEval(const DateTimeFormat: string; const DateTimeStr: string): TDateTime;
+
+function DateToJsonString(const aValue : TDate): String;
+function TimeToJsonString(const aValue : TTime): String;
+function DateTimeToJsonString(const aValue : TDateTime): String;
+
+function TryToUnderstandJsonDateString(const aInputString: string; out aValue: TDate): boolean;
+function TryToUnderstandJsonTimeString(const aInputString: string; out aValue: TTime): boolean;
+function TryToUnderstandJsonDateTimeString(const aInputString: string; out aValue: TDateTime): boolean;
 
 // https://code.google.com/p/theunknownones/
 function VarRecToVariant (AValue : TVarRec) : Variant;
@@ -107,6 +117,7 @@ function ConvertIntegerListToVariant (const aList : TIntegerList): Variant;
 function ConvertDoubleListToVariant (const aList : TDoubleList): Variant;
 function ConvertDoublesToVariant(const aValue1, aValue2: double): Variant;
 function ConvertIntegersToVariant(const aValue1, aValue2: integer): Variant;
+function ConvertDatesToVariant(const aValue1, aValue2 : TDate): Variant;
 
 function GetCPUCores : integer;
 function GetApplicationLocalDataFolder (const aApplicationSubDir : string) : String;
@@ -195,6 +206,14 @@ var
 {$IFDEF LINUX}
 function sysconf(i:cint):clong;cdecl;external name 'sysconf';
 {$ENDIF}
+
+function GetUniqueTemporaryFolder: string;
+begin
+  Result := IncludeTrailingPathDelimiter(GetTempDir) + mUtility.GenerateRandomIdString;
+  if not DirectoryExists(Result) then
+     if not ForceDirectories(Result) then
+         raise Exception.Create('Unable to create temporary folder: ' + Result);
+end;
 
 procedure WordwrapStringByRows(const aSourceString: String; const aNumOfRows: integer; aRows: TStringList);
 var
@@ -942,6 +961,48 @@ begin
   Result := Retvar;
 end;
 
+function DateToJsonString(const aValue: TDate): String;
+begin
+  Result := FormatDateTime('yyyy"-"mm"-"dd"Z"', aValue);
+end;
+
+function TimeToJsonString(const aValue: TTime): String;
+begin
+  Result := FormatDateTime('"T"hh":"mm":"ss"Z"', aValue);
+end;
+
+function DateTimeToJsonString(const aValue: TDateTime): String;
+begin
+  Result := FormatDateTime('yyyy"-"mm"-"dd"T"hh":"mm":"ss"Z"', aValue);
+end;
+
+function TryToUnderstandJsonDateString(const aInputString: string; out aValue: TDate): boolean;
+begin
+  Result := false;
+  aValue := trunc(DateTimeStrEval('yyyy-mm-ddZ', aInputString));
+  Result := (aValue > 0);
+end;
+
+function TryToUnderstandJsonTimeString(const aInputString: string; out aValue: TTime): boolean;
+begin
+  Result := false;
+  aValue := DateTimeStrEval('Thh:mm:ssZ', aInputString);
+  if aValue > 0 then
+  begin
+    Result := true;
+    aValue := aValue - trunc(aValue);
+  end;
+end;
+
+function TryToUnderstandJsonDateTimeString(const aInputString: string; out aValue: TDateTime): boolean;
+var
+  v : TDateTime;
+begin
+  Result := false;
+  aValue := DateTimeStrEval('yyyy-mm-ddThh:mm:ssZ', aInputString);
+  Result := (aValue > 0);
+end;
+
 {$IFDEF FPC}
 function CharInSet(C: Char; const CharSet: TSysCharSet): Boolean;
 begin
@@ -1349,6 +1410,16 @@ var
   tmpVariant : variant;
 begin
   tmpVariant := Variants.VarArrayCreate([0, 1], varinteger);
+  VarArrayPut(tmpVariant, aValue1, [0]);
+  VarArrayPut(tmpVariant, aValue2, [1]);
+  Result := tmpVariant;
+end;
+
+function ConvertDatesToVariant(const aValue1, aValue2: TDate): Variant;
+var
+  tmpVariant : variant;
+begin
+  tmpVariant := Variants.VarArrayCreate([0, 1], vardate);
   VarArrayPut(tmpVariant, aValue1, [0]);
   VarArrayPut(tmpVariant, aValue2, [1]);
   Result := tmpVariant;
