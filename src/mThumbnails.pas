@@ -29,7 +29,9 @@ implementation
 
 uses
   sysutils,
-  mUtility, mXPdf, mLog,
+  mUtility,
+  mPoppler,
+  mLog,
   {$IFDEF NOGUI}
   mGraphicsUtilityNoGUI
   {$ELSE}
@@ -67,11 +69,26 @@ begin
   if isPdf then
   begin
     try
-      //Result := TMutoolToolbox.ExtractThumbnailOfFrontPageFromPdf(aSourceFile, aThumbnailFileName, aMaxWidth, aMaxHeight);
+      logger.Debug('[GeneratePNGThumbnail - file] Running ExtractThumbnailOfFrontPageFromPdfAsPng');
+      Result := TPopplerToolbox.ExtractThumbnailOfFrontPageFromPdfAsPng(aSourceFile, aThumbnailFileName, aMaxWidth, aMaxHeight);
+      if not Result then
+      begin
+        aError:= TPopplerToolbox.GetLastError;
+        logger.Error(aError);
+      end
+      else
+        logger.Debug('Generated thumbnail for pdf file: ' + aSourceFile);
+      (*
+      {$IFDEF UNIX}
+      Result := TPopplerToolbox.ExtractThumbnailOfFrontPageFromPdfAsPng(aSourceFile, aThumbnailFileName, aMaxWidth, aMaxHeight);
+      {$ELSE}
       Result := TXPdfToolbox.ExtractThumbnailOfFrontPageFromPdf(aSourceFile, aThumbnailFileName, aMaxWidth, aMaxHeight);
+      {$ENDIF}
+      *)
     except
       on e: Exception do
       begin
+        logger.Error(e.Message);
         aError := e.Message;
         exit;
       end;
@@ -134,13 +151,26 @@ begin
     if isPdf then
     begin
       try
+        Result := TPopplerToolbox.ExtractThumbnailOfFrontPageFromPdfAsPng(tmpSourceFileName, tmpThumbnailFileName, aMaxWidth, aMaxHeight);
+        if not Result then
+        begin
+          aError:= TPopplerToolbox.GetLastError;
+          logger.Error(aError);
+        end
+        else
+          logger.Debug('Generated thumbnail for pdf file: ' + tmpSourceFileName);
+        (*
+        {$IFDEF UNIX}
+        Result := TPopplerToolbox.ExtractThumbnailOfFrontPageFromPdfAsPng(tmpSourceFileName, tmpThumbnailFileName, aMaxWidth, aMaxHeight);
+        {$ELSE}
         Result := TXPdfToolbox.ExtractThumbnailOfFrontPageFromPdf(tmpSourceFileName, tmpThumbnailFileName, aMaxWidth, aMaxHeight);
-        logger.Debug('Generated thumbnail for pdf file: ' + tmpThumbnailFileName);
+        {$ENDIF}
+        *)
       except
         on e: Exception do
         begin
           aError := e.Message;
-          logger.Debug(e.Message);
+          logger.Error(e.Message);
           exit;
         end;
       end;

@@ -114,9 +114,6 @@ uses
   {$IFDEF DEBUG}, mLog{$ENDIF}
   ;
 
-const
-  MAX_CONCURRENT_THREADS_LIMIT = 999;
-
 type
 
   { TJobThread }
@@ -281,7 +278,7 @@ begin
   FThreads := TObjectList.Create(true);
   FCanDieEvents := TObjectList.Create(true);
   FJobsRunning := TIntegerList.Create;
-  FMaxConcurrentThreads:= MAX_CONCURRENT_THREADS_LIMIT;
+  FMaxConcurrentThreads:= 99;
 end;
 
 destructor TControlThread.Destroy;
@@ -291,7 +288,7 @@ begin
   for i := 0 to FThreads.Count - 1 do
   begin
     (FThreads.Items[i] as TThread).Terminate;
-    (FCanDieEvents.Items[i] as TSimpleEvent).WaitFor(3000);
+    (FCanDieEvents.Items[i] as TSimpleEvent).WaitFor(INFINITE);
   end;
   FreeAndNil(FThreads);
   FreeAndNil(FCanDieEvents);
@@ -321,11 +318,14 @@ begin
       FJobsRunning.Clear;
 
       {$IFDEF DEBUG}
-      logger.Debug('[TControlThread] Scheduled jobs:' + IntToStr(FJobs.Count));
-      logger.Debug('[TControlThread] Max parallel jobs:' + IntToStr(FMaxConcurrentThreads));
+      if not Terminated then
+      begin
+        logger.Debug('[TControlThread] Scheduled jobs:' + IntToStr(FJobs.Count));
+        logger.Debug('[TControlThread] Max parallel jobs:' + IntToStr(FMaxConcurrentThreads));
+      end;
       {$ENDIF}
 
-      if FJobs.Count > 0 then
+      if (FJobs.Count > 0) then
       begin
         FRunning := true;
 
@@ -395,7 +395,11 @@ begin
           {$IFDEF DEBUG}
           logger.Debug('[TControlThread] Running callback...');
           {$ENDIF}
+          {$IFDEF GUI}
           Synchronize(RunEndCallBack);
+          {$ELSE}
+          RunEndCallBack;
+          {$ENDIF}
           FThreads.Clear;
           FCanDieEvents.Clear;
           FJobs.Clear;
@@ -409,7 +413,11 @@ begin
     begin
       DumpExceptionBackTrace;
       FLastException := e;
+      {$IFDEF GUI}
       Synchronize(ReRaiseLastException);
+      {$ELSE}
+      ReRaiseLastException;
+      {$ENDIF}
     end;
   end;
 end;
@@ -490,7 +498,7 @@ end;
 constructor TmBatchExecutor.Create;
 begin
   FRunning:= false;
-  MaxConcurrentThreads:= MAX_CONCURRENT_THREADS_LIMIT;
+  MaxConcurrentThreads:= GetCPUCores * 2;
   FCanEndEvent := TSimpleEvent.Create;
   FControlThread := TControlThread.Create;
   GetControlThread(Self).CanDieEvent := FCanEndEvent;
@@ -502,7 +510,7 @@ begin
   begin
     FControlThread.Terminate;
     (FControlThread as TControlThread).CanStartEvent.SetEvent;
-    FCanEndEvent.WaitFor(3000);
+    FCanEndEvent.WaitFor(INFINITE);
     FreeAndNil(FControlThread);
   end;
   FreeAndNil(FCanEndEvent);

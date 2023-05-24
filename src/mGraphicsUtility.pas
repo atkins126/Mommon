@@ -66,6 +66,9 @@ type
 
   function GeneratePNGThumbnailOfImage(const aSourceFile, aThumbnailFile: String; const aMaxWidth, aMaxHeight: word;out aError: String): boolean;
 
+  procedure FlashInWindowsTaskbar(const aFlashEvenIfActive : boolean);
+
+
 implementation
 
 uses
@@ -119,13 +122,14 @@ begin
 
   if aAdjustFontSize and (aText <> '') then
   begin
+    aCanvas.Font.Size := max(aCanvas.Font.Size, 1);
     lastSize := aCanvas.Font.Size;
 
     w := aCanvas.TextWidth(aText);
     h := aCanvas.TextHeight(aText);
-    if (w > aRect.Width) or (h > Arect.Height) then
+    if (w > aRect.Width) or (h > ARect.Height) then
     begin
-      while ((w > aRect.Width) or (h > Arect.Height)) and (aCanvas.Font.Size > 7) do
+      while ((w > aRect.Width) or (h > ARect.Height)) and (aCanvas.Font.Size > 1) do
       begin
         aCanvas.Font.Size := aCanvas.Font.Size - 1;
         w := aCanvas.TextWidth(aText);
@@ -542,6 +546,18 @@ begin
   {$ENDIF}
 end;
 
+procedure FlashInWindowsTaskbar(const aFlashEvenIfActive : boolean);
+begin
+  {$IFDEF WINDOWS}
+  {$IFDEF FPC}{$push}{$warnings off}{$ENDIF}
+  begin
+  // http://forum.lazarus.freepascal.org/index.php?topic=33574.0
+  If aFlashEvenIfActive or (not Application.Active) Then
+    FlashWindow({$IFDEF FPC}WidgetSet.AppHandle{$ELSE}Application.Handle{$ENDIF}, True);
+  end;
+  {$IFDEF FPC}{$pop}{$ENDIF}
+  {$ENDIF}
+end;
 
 
 {$IFNDEF GUI}

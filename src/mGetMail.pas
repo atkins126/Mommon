@@ -72,6 +72,8 @@ type
     property Sender : String read FSender write FSender;
   end;
 
+  TProcessMailMessage = procedure (aMailMessage : TReceivedMail; out aCanDeleteMailFromServer : boolean) of object;
+
   { TGetMailPop3 }
 
   TGetMailPop3 = class
@@ -80,6 +82,8 @@ type
     FPort: Integer;
     FUserName: String;
     FPassword: String;
+    FTimeout : integer;
+    FConnectTimeout : integer;
     FAcceptOnlyMailFromSpecificDomain : boolean;
     FAllowedSenderDomains : TStringList;
     FSSLConnection : boolean;
@@ -91,10 +95,13 @@ type
     procedure IdSASLXOAuth21GetAccessToken(Sender: TObject; var AccessToken: string);
     {$ENDIF}
   public
+    const DEFAULT_TIMEOUT : integer = -1;
+    const TIMEOUT_INFINITE : integer = -2;
+  public
     constructor Create;
     destructor Destroy; override;
 
-    function CheckMail(out aErrorMessage: String) : boolean;
+    function CheckMail(out aErrorMessage: String; const aProcessMessage: TProcessMailMessage) : boolean;
     function MailsCount : integer;
     function GetMail (const aIndex : integer): TReceivedMail;
 
@@ -106,6 +113,8 @@ type
     function SetSSLConnection : TGetMailPop3;
     function SetTLSConnection : TGetMailPop3;
     function SetAcceptOnlyMailFromSpecificDomain : TGetMailPop3;
+    function SetTimeout(const aMSec : integer): TGetMailPop3;
+    function SetConnectTimeout(const aMSec : integer): TGetMailPop3;
     function AddAllowedSenderDomain(const aAllowedSenderDomain: String): TGetMailPop3;
   end;
 
@@ -528,6 +537,8 @@ constructor TGetMailPop3.Create;
 begin
   FHost:= '127.0.0.1';
   FPort:= 995;
+  FTimeout:= TIMEOUT_INFINITE;
+  FConnectTimeout:= 5000;
   FUserName:= '';
   FPassword:= '';
   FSSLConnection:= false;
@@ -544,12 +555,14 @@ begin
   inherited Destroy;
 end;
 
-function TGetMailPop3.CheckMail(out aErrorMessage: String): boolean;
+function TGetMailPop3.CheckMail(out aErrorMessage: String; const aProcessMessage: TProcessMailMessage): boolean;
 var
   tmpPop3 : TIdPOP3;
   error : boolean;
   i, numMessages : integer;
   msg : TIdMessage;
+  doDelete : boolean;
+  curMailMessage : TReceivedMail;
   {$IFDEF OUTLOOK_OAUTH2_AVAILABLE}
   xoauthSASL : TIdSASLListEntry;
   {$ENDIF}
@@ -563,6 +576,7 @@ begin
   try
     tmpPop3.Host:= FHost;
     tmpPop3.Port:= FPort;
+    tmpPop3.ReadTimeout:= FTimeout;
 
     if FSSLConnection then
     begin
@@ -580,7 +594,7 @@ begin
       tmpPop3.UseTLS := utUseExplicitTLS;
     end;
 
-    tmpPop3.ConnectTimeout:= 5000;
+    tmpPop3.ConnectTimeout:= FConnectTimeout;
 
     if FAuthentication = paOutlookOAuth2 then
     begin
@@ -627,13 +641,22 @@ begin
           try
             tmpPop3.Retrieve(i, msg);
             if (not FAcceptOnlyMailFromSpecificDomain) or (FAllowedSenderDomains.IndexOf(LowerCase(msg.From.Domain)) >= 0) then
-              ImportMessage(msg, AddReceivedMail)
-              {$IFDEF MLOG_AVAILABLE}
+            begin
+              curMailMessage := AddReceivedMail;
+              ImportMessage(msg, curMailMessage);
+              doDelete:= false;
+              aProcessMessage(curMailMessage, doDelete);
+              if doDelete then
+                tmpPop3.Delete(i);
+            end
             else
-              logger.Info('Discarded mail from ' + msg.From.Address)
+            begin
+              {$IFDEF MLOG_AVAILABLE}
+              logger.Info('Discarded mail from ' + msg.From.Address);
               {$ENDIF}
-            ;
-            tmpPop3.Delete(i);
+              tmpPop3.Delete(i);
+            end;
+
           finally
             msg.Free;
           end;
@@ -709,6 +732,18 @@ end;
 function TGetMailPop3.SetAcceptOnlyMailFromSpecificDomain: TGetMailPop3;
 begin
   FAcceptOnlyMailFromSpecificDomain:= true;
+  Result := Self;
+end;
+
+function TGetMailPop3.SetTimeout(const aMSec: integer): TGetMailPop3;
+begin
+  FTimeout:= aMSec;
+  Result := Self;
+end;
+
+function TGetMailPop3.SetConnectTimeout(const aMSec: integer): TGetMailPop3;
+begin
+  FConnectTimeout:= aMSec;
   Result := Self;
 end;
 

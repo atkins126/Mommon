@@ -21,9 +21,6 @@ interface
 uses
   Classes, SysUtils, Variants, {$IFDEF WINDOWS}Windows, {$IFDEF FPC}{$IFDEF GRAPHICS_AVAILABLE}InterfaceBase,{$ENDIF}{$ENDIF} {$ENDIF}
   {$IFDEF GRAPHICS_AVAILABLE}Graphics,{$ENDIF}
-  {$IFDEF GUI}
-  Forms,
-  {$ENDIF}
   mIntList, mDoubleList;
 
 const
@@ -33,7 +30,7 @@ type
   TListSortCompare = function (Item1, Item2: Pointer): Integer of object; // cloned from LCLProc but with 'of object'
 
 function GenerateRandomIdString : string; overload;
-function GenerateRandomIdString(aLength : integer): string; overload;
+function GenerateRandomIdString(aLength : integer; const aOnlyLetters : boolean = false): string; overload;
 function CreateUniqueIdentifier : String; // actually a GUID without parentheses, to be used as unique indentifier in db tables
 function IsUniqueIdentifier (const aUI : String): boolean;
 {$IFDEF FPC}
@@ -53,7 +50,7 @@ function DateTimeToSeconds(const aDateTime : TDateTime; const aTheDayWhenTimeSta
 function SecondsToDateTime(const aSeconds : integer; const aTheDayWhenTimeStarted : integer = TheDayWhenTimeStarted): TDateTime;
 
 // try to convert the input text from the user as a date value, if it fails it returns false
-// user can edit date as ddmmyy or ddmmyyyy or dmyy or with separators like '/', '\', '-', ....
+// user can edit date as ddmmyy or ddmmyyyy or dmyy or with separators like '/', '\', '-', ' ' or '12 Jan 2022' or '27 September 2021' or '15 Maggio 2023'....
 function TryToUnderstandDateString(const aInputString : String; out aValue : TDateTime) : boolean;
 // try to convert the input text from the user as a time value, if it fails it returns false
 // user can edit time as hhmm or hhmmss or with separators like ':', '.', ....
@@ -68,11 +65,11 @@ function TryToUnderstandBooleanString(const aInputString : String; out aValue : 
 function DateTimeStrEval(const DateTimeFormat: string; const DateTimeStr: string): TDateTime;
 
 function DateToJsonString(const aValue : TDate): String;
-function TimeToJsonString(const aValue : TTime): String;
+function TimeToJsonString(const aValue : {$IFDEF UNIX}TDateTime{$ELSE}TTime{$ENDIF}): String;
 function DateTimeToJsonString(const aValue : TDateTime): String;
 
 function TryToUnderstandJsonDateString(const aInputString: string; out aValue: TDate): boolean;
-function TryToUnderstandJsonTimeString(const aInputString: string; out aValue: TTime): boolean;
+function TryToUnderstandJsonTimeString(const aInputString: string; out aValue: {$IFDEF UNIX}TDateTime{$ELSE}TTime{$ENDIF}): boolean;
 function TryToUnderstandJsonDateTimeString(const aInputString: string; out aValue: TDateTime): boolean;
 
 // https://code.google.com/p/theunknownones/
@@ -100,6 +97,10 @@ function KeepOnlyLetters (const aSource : String; const aUnderscoreForSpaces: bo
 function KeepOnlyLettersAndNumbers (const aSource : String; const aUnderscoreForSpaces: boolean) : String;
 
 function ExtractSameLeftStringPart(const aList : TStringList): String;
+// i.e. source = 'Lazy cat is sleeping' => 'Lazy'
+// i.e. source = 'NoSpaceHere' => 'NoSpaceHere'
+function ExtractFirstWord(const aSource : String; const aSeparator : String = ' '): String;
+function ExtractLastWord(const aSource : String; const aSeparator : String = ' '): String;
 
 function ExtractLastFolderFromPath (aFullPath : string) : string;
 
@@ -123,9 +124,6 @@ function GetCPUCores : integer;
 function GetApplicationLocalDataFolder (const aApplicationSubDir : string) : String;
 function GetApplicationDataFolder (const aApplicationSubDir : string) : String;
 function GetOSUser : string;
-{$IFDEF GUI}
-procedure FlashInWindowsTaskbar(const aFlashEvenIfActive : boolean);
-{$ENDIF}
 // http://forum.codecall.net/topic/69184-solved-file-association-and-the-registry/
 function RegisterDefaultApplication(const aFullPathExe : string; const aFileExtension : string; var aError : string): boolean;
 
@@ -151,6 +149,8 @@ function EncodeSVGString(const aSrc : String): String;
 function EscapeStringValue(const aSrc: String; const aType: String): String;
 function RevertEscapedStringValue(const aSrc: String; const aType: String): String;
 
+function TBytesToString (const aSrc : TBytes): String;
+
 // https://docs.microsoft.com/it-it/windows/desktop/FileIO/naming-a-file#basic_naming_conventions
 function SanitizeFileName(const aSrc: String) : String;
 function SanitizeSubstringForFileName(const aSubString : String): String;
@@ -174,6 +174,8 @@ function CurrentProcessId: cardinal; // look at Indy function CurrentProcessId: 
 function IsRunningAsRoot: boolean;
 procedure RunConsoleApplicationAndGetOutput(const aCommand : string; const aParameters : array of string; out aOutputText : String);
 {$ENDIF}
+
+function CheckCLU (const aCLU : String): boolean;
 
 {$IFDEF DELPHI}
 function VarIsBool(const V: Variant): Boolean;
@@ -308,15 +310,24 @@ begin
       inc(Result);
 end;
 
-function GenerateRandomIdString(aLength : integer): string;
+function GenerateRandomIdString(aLength : integer; const aOnlyLetters : boolean = false): string;
 var
   Temp: string;
-  i: integer;
+  i, k: integer;
 begin
   Result := '';
-  Temp := 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  if aOnlyLetters then
+  begin
+    Temp := 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    k := 25;
+  end
+  else
+  begin
+    Temp := 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    k := 35;
+  end;
   for i := 0 to aLength - 1 do
-    Result := Result + Temp[Random(35)+1];
+    Result := Result + Temp[Random(k)+1];
 end;
 
 function GenerateRandomIdString : string;
@@ -409,12 +420,31 @@ begin
 end;
 
 function TryToUnderstandDateString(const aInputString : String; out aValue : TDateTime) : boolean;
+
+  function DecodeMonthName (const aValue : String; aMonthNames : TMonthNameArray): integer;
+  var
+    z : integer;
+  begin
+    Result := 0;
+    for z := Low(aMonthNames) to High(aMonthNames) do
+    begin
+      if CompareText(aMonthNames[z], aValue) = 0 then
+      begin
+        Result := z;
+        exit;
+      end;
+    end;
+  end;
 var
   l, idx, i : integer;
   tmp,  sep : string;
   dString, mString, yString : string;
   day, month, year : integer;
   canTry : boolean;
+  EnglishShortMonthNames: TMonthNameArray = ('Jan','Feb','Mar','Apr','May','Jun',
+          'Jul','Aug','Sep','Oct','Nov','Dec');
+  EnglishLongMonthNames: TMonthNameArray = ('January','February','March','April','May','June',
+          'July','August','September','October','November','December');
 begin
   Result := false;
   canTry := false;
@@ -441,6 +471,11 @@ begin
   if idx = 0 then
   begin
     sep := '.';
+    idx := Pos(sep, tmp);
+  end;
+  if idx = 0 then
+  begin
+    sep := ' ';
     idx := Pos(sep, tmp);
   end;
 
@@ -516,6 +551,51 @@ begin
           begin
             Result := TryEncodeDate(year, month, day, aValue);
             exit;
+          end;
+        end;
+      end;
+    end
+    else if IsNumeric(dString, false, false) and IsNumeric(yString, false, false) then
+    begin
+      month := DecodeMonthName(mString, DefaultFormatSettings.ShortMonthNames);
+      if month = 0 then
+        month := DecodeMonthName(mString, DefaultFormatSettings.LongMonthNames);
+      if month = 0 then
+        month := DecodeMonthName(mString, FormatSettings.ShortMonthNames);
+      if month = 0 then
+        month := DecodeMonthName(mString, FormatSettings.LongMonthNames);
+
+      if month = 0 then
+        month := DecodeMonthName(mString, EnglishShortMonthNames);
+
+      if month = 0 then
+        month := DecodeMonthName(mString, EnglishLongMonthNames);
+
+      if month > 0 then
+      begin
+        for i := 1 to 2 do
+        begin
+          if i = 1 then
+          begin
+            day := StrToInt(dString);
+            year := StrToInt(yString);
+          end
+          else
+          begin
+            // yyyy ABC dd
+            day := StrToInt(yString);
+            year := StrToInt(dString);
+          end;
+
+          if (year >= 0) and (day >= 1) and (day <= 31) then
+          begin
+            if year < 100 then
+              year := 2000 + year;
+            if day <= DaysInAMonth(year, month) then
+            begin
+              Result := TryEncodeDate(year, month, day, aValue);
+              exit;
+            end;
           end;
         end;
       end;
@@ -692,7 +772,10 @@ var
 begin
   Result := false;
   tmp := Uppercase(Trim(aInputString));
-  i := Pos(' ', tmp);
+  i := 0;
+  for i := Length(tmp) downto 1 do
+    if tmp[i] = ' ' then
+      break;
   if i > 1 then
   begin
     if TryToUnderstandDateString(Copy(tmp, 1, i-1), tmpDate) then
@@ -966,7 +1049,7 @@ begin
   Result := FormatDateTime('yyyy"-"mm"-"dd"Z"', aValue);
 end;
 
-function TimeToJsonString(const aValue: TTime): String;
+function TimeToJsonString(const aValue: {$IFDEF UNIX}TDateTime{$ELSE}TTime{$ENDIF}): String;
 begin
   Result := FormatDateTime('"T"hh":"mm":"ss"Z"', aValue);
 end;
@@ -983,7 +1066,7 @@ begin
   Result := (aValue > 0);
 end;
 
-function TryToUnderstandJsonTimeString(const aInputString: string; out aValue: TTime): boolean;
+function TryToUnderstandJsonTimeString(const aInputString: string; out aValue: {$IFDEF UNIX}TDateTime{$ELSE}TTime{$ENDIF}): boolean;
 begin
   Result := false;
   aValue := DateTimeStrEval('Thh:mm:ssZ', aInputString);
@@ -995,8 +1078,6 @@ begin
 end;
 
 function TryToUnderstandJsonDateTimeString(const aInputString: string; out aValue: TDateTime): boolean;
-var
-  v : TDateTime;
 begin
   Result := false;
   aValue := DateTimeStrEval('yyyy-mm-ddThh:mm:ssZ', aInputString);
@@ -1075,6 +1156,30 @@ begin
   Result := LeftStr(aList.Strings[0], maxLength);
 end;
 
+function ExtractFirstWord(const aSource: String; const aSeparator: String): String;
+var
+  p : integer;
+begin
+  Result := '';
+  p := Pos(aSeparator, aSource);
+  if p > 1 then
+    Result := Copy(aSource, 1, p - 1)
+  else if p <= 0 then
+    Result := aSource;
+end;
+
+function ExtractLastWord(const aSource: String; const aSeparator: String): String;
+var
+  p : integer;
+begin
+  Result := '';
+  p := RPos(aSeparator, aSource);
+  if p >= 1 then
+    Result := Copy(aSource, p + Length(aSeparator), Length(aSource))
+  else if p <= 0 then
+    Result := aSource;
+end;
+
 function ExtractLastFolderFromPath(aFullPath: string): string;
 var
   tmp : TStringList;
@@ -1097,6 +1202,7 @@ begin
   pwd := aPassword;
   while Length(pwd) < len do
     pwd := pwd + aPassword;
+  Result := '';
   SetLength(result, len);
   for i := 1 to len do
     result[i] := Chr(Ord(aText[i]) xor Ord(pwd[i]));
@@ -1541,18 +1647,6 @@ begin
 end;
 
 {$IFDEF GUI}
-procedure FlashInWindowsTaskbar(const aFlashEvenIfActive : boolean);
-begin
-  {$IFDEF WINDOWS}
-  {$IFDEF FPC}{$push}{$warnings off}{$ENDIF}
-  begin
-  // http://forum.lazarus.freepascal.org/index.php?topic=33574.0
-  If aFlashEvenIfActive or (not Application.Active) Then
-    FlashWindow({$IFDEF FPC}WidgetSet.AppHandle{$ELSE}Application.Handle{$ENDIF}, True);
-  end;
-  {$IFDEF FPC}{$pop}{$ENDIF}
-  {$ENDIF}
-end;
 {$ENDIF}
 
 function RegisterDefaultApplication(const aFullPathExe: string; const aFileExtension: string; var aError : string) : boolean;
@@ -2380,6 +2474,15 @@ begin
   end;
 end;
 
+function TBytesToString(const aSrc: TBytes): String;
+var
+  i : integer;
+begin
+  Result := '';
+  for i := Low(aSrc) to High(aSrc) do
+    Result := Result + HexStr(aSrc[i],2)
+end;
+
 (*
     https://docs.microsoft.com/it-it/windows/desktop/FileIO/naming-a-file#basic_naming_conventions
 
@@ -2487,6 +2590,28 @@ begin
     tmpProcess.Free;
   end;
 end;
+
+function CheckCLU(const aCLU: String): boolean;
+{$IFDEF UNIX}
+var
+  cmd, outputString : String;
+{$ENDIF}
+begin
+  {$IFDEF WINDOWS}
+  Result := false;
+  if not FileExists(aCLU) then
+    exit;
+  Result := true;
+  {$ELSE}
+  {$IFDEF UNIX}
+  cmd := '-v ' + aCLU;
+  Result := RunCommand('/bin/bash',['-c','command', cmd], outputString, [poNoConsole, poWaitOnExit, poStderrToOutPut]);
+  {$ELSE}
+  Result := false;
+  {$ENDIF}
+  {$ENDIF}
+end;
+
 {$ENDIF}
 
 function GetTimeStampForFileName(const aInstant: TDateTime; const aAddTime : boolean = true): string;

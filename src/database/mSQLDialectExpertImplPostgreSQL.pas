@@ -29,8 +29,8 @@ type
   public
     constructor Create; override;
     function GetSQLForParameter (aParam : TmQueryParameter) : string; override;
-    function GetSQLForFieldname(const aFieldName: String): String; override; overload;
-    function GetSQLForTablename(const aTableName: String): String; override;
+    //function GetSQLForFieldname(const aFieldName: String; const aOperator: TmFilterOperator): String; override;
+    //function GetSQLForTablename(const aTableName: String): String; override;
     function GetSQLForConditionOperator (const aOperator: TmFilterOperator) : string; override;
   end;
 
@@ -361,23 +361,28 @@ begin
   end;
 end;
 
-function TSQLDialectExpertImplPostgreSQL.GetSQLForFieldname(const aFieldName: String): String;
+(*
+function TSQLDialectExpertImplPostgreSQL.GetSQLForFieldname(const aFieldName: String; const aOperator: TmFilterOperator): String;
 begin
   Result:= '"' + aFieldName + '"';
-end;
+end;*)
 
+(*
 function TSQLDialectExpertImplPostgreSQL.GetSQLForTablename(const aTableName: String): String;
 begin
   Result:= '"' + aTableName + '"';
-end;
+end;*)
 
 function TSQLDialectExpertImplPostgreSQL.GetSQLForConditionOperator(const aOperator: TmFilterOperator): string;
 begin
-  Result:=inherited GetSQLForConditionOperator(aOperator);
   // ILIKE is used instead of LIKE to perform a case-unsensitive like condition check
   // and to get it working like in SQL Server or MySQL
   if (aOperator = foLike) or (aOperator = foStartWith) or (aOperator = foEndWith) then
-    Result := 'ILIKE';
+    Result := 'ILIKE'
+  else if (aOperator = foNotEq) then   // null-safe equality operator, see https://wiki.postgresql.org/wiki/Is_distinct_from
+    Result := 'IS DISTINCT FROM'
+  else
+    Result:=inherited GetSQLForConditionOperator(aOperator);
 end;
 
 initialization
