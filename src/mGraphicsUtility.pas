@@ -31,6 +31,7 @@ uses
 
 type
   TRectangleSide = (rsCenter, rsTop, rsLeft, rsBottom, rsRight, rsOutside);
+  TTriangleOrientation = (toTop, toBottom, toLeft, toRight);
 
   procedure GetScreenShot (aBitmap : Graphics.TBitmap);
   procedure CropBitmap (aSourceBitmap, aDestBitmap : Graphics.TBitmap; X, Y : integer);
@@ -51,8 +52,11 @@ type
 
   // https://forum.lazarus.freepascal.org/index.php?topic=36579.0
   function GetTextWidth(const aText: String; const aFont: TFont): Integer;
+  procedure GetTextExtend(const aText: String; const aFont: TFont; var aSize : TPoint);
 
   procedure WriteText(aCanvas: TCanvas; const aRect: TRect; const aText: string; aTextAlignment: TAlignment; const aAdjustFontSize : boolean);
+  procedure DrawTriangle(aCanvas: TCanvas; const aRect: TRect; const aOrientation : TTriangleOrientation);
+  procedure DrawCheckedBox(aCanvas: TCanvas; const aRect: TRect; const aValue : boolean; const aColor, aBackgroundColor, aBorderColor : TColor);
 
   {$IFDEF FPC}
   function IsDoubleBufferedNeeded: boolean;
@@ -65,6 +69,7 @@ type
   procedure CopyTextToClipboard(aText: string);
 
   function GeneratePNGThumbnailOfImage(const aSourceFile, aThumbnailFile: String; const aMaxWidth, aMaxHeight: word;out aError: String): boolean;
+  function GenerateJPGThumbnailOfImage(const aSourceFile, aThumbnailFile: String; const aMaxWidth, aMaxHeight: word;out aError: String): boolean;
 
   procedure FlashInWindowsTaskbar(const aFlashEvenIfActive : boolean);
 
@@ -85,6 +90,9 @@ const
   HLSMAX = 255;
 {$ENDIF}
 
+var
+  _TextExtendBitmap : TBitmap;
+
 {$IFDEF FPC}
 function IsDoubleBufferedNeeded: boolean;
 begin
@@ -104,6 +112,18 @@ begin
   finally
     bmp.Free;
   end;
+end;
+
+procedure GetTextExtend(const aText: String; const aFont: TFont; var aSize: TPoint);
+var
+  sz : TSize;
+begin
+  if not Assigned(_TextExtendBitmap) then
+    _TextExtendBitmap := TBitmap.Create;
+  _TextExtendBitmap.Canvas.Font.Assign(aFont);
+  sz := _TextExtendBitmap.Canvas.TextExtent(aText);
+  aSize.X:= sz.Width;
+  aSize.Y:= sz.Height;
 end;
 
 procedure WriteText(aCanvas: TCanvas; const aRect: TRect; const aText: string; aTextAlignment: TAlignment; const aAdjustFontSize : boolean);
@@ -194,6 +214,82 @@ begin
   if DrawText(aCanvas.Handle, PChar(aText), -1, tmpRect, TempFlags) = 0 then
     RaiseLastOSError;
   {$ENDIF}
+end;
+
+procedure DrawTriangle(aCanvas: TCanvas; const aRect: TRect; const aOrientation: TTriangleOrientation);
+var
+  P: Array[0..2] of TPoint;
+begin
+  case aOrientation of
+    toTop:
+      begin
+        P[0]:= aRect.CenterPoint;
+        P[0].Y:= aRect.Top;
+        P[1]:= aRect.BottomRight;
+        P[2]:= P[1];
+        P[2].X:= aRect.Left;
+      end;
+    toBottom:
+      begin
+        P[0]:= aRect.CenterPoint;
+        P[0].Y:= aRect.Bottom;
+        P[1]:= aRect.TopLeft;
+        P[2]:= P[1];
+        P[2].X:= aRect.Right;
+      end;
+    toRight:
+      begin
+        P[0]:= aRect.CenterPoint;
+        P[0].X:= aRect.Right;
+        P[1]:= aRect.TopLeft;
+        P[2]:= P[1];
+        P[2].Y:= aRect.Bottom;
+      end
+    else
+      begin
+        P[0]:= aRect.CenterPoint;
+        P[0].X:= aRect.Left;
+        P[1]:= aRect.BottomRight;
+        P[2]:= P[1];
+        P[2].Y:= aRect.Top;
+      end;
+  end;
+  aCanvas.Polygon(P);
+end;
+
+procedure DrawCheckedBox(aCanvas: TCanvas; const aRect: TRect; const aValue: boolean; const aColor, aBackgroundColor, aBorderColor : TColor);
+var
+  oldBrushColor, oldColor: TColor;
+  p1, p2, p3 : TPoint;
+  bw : integer;
+  tmpRect : TRect;
+begin
+  oldBrushColor := aCanvas.Brush.Color;
+  oldColor := aCanvas.Pen.Color;
+  aCanvas.Brush.Color:= aBackgroundColor;
+  tmpRect := aRect;
+  aCanvas.FillRect(tmpRect);
+  bw := 2;
+  aCanvas.Pen.Width:= bw;
+  aCanvas.Pen.Color:= aBorderColor;
+  aCanvas.Rectangle(tmpRect);
+  if aValue then
+  begin
+    aCanvas.Pen.Color:= aColor;
+    bw := max(3, tmpRect.Width div 5);
+    InflateRect(tmpRect, -1 * bw, -1 * bw);
+    p1.X := tmpRect.Left;
+    p1.Y := tmpRect.Top + (tmpRect.Height div 2);
+    p2.X := tmpRect.Left + (tmpRect.Width div 2) - (bw div 2);
+    p2.Y := tmpRect.Bottom - (bw div 2);
+    p3.X := tmpRect.Right - (bw div 2);
+    p3.Y := tmpRect.Top;
+    aCanvas.Pen.Width:= bw;
+    aCanvas.Line(p1, p2);
+    aCanvas.Line(p2, p3);
+  end;
+  aCanvas.Brush.Color := oldBrushColor;
+  aCanvas.Pen.Color:= oldColor;
 end;
 
 {$IFDEF FPC}
@@ -459,39 +555,55 @@ begin
 Result := ({$IFNDEF FPC}GetAsyncKeyState{$ELSE}GetKeyState{$ENDIF}(VK_SHIFT) and $8000 <> 0)
 end;
 
-function GeneratePNGThumbnailOfImage(const aSourceFile, aThumbnailFile: String; const aMaxWidth, aMaxHeight: word;out aError: String): boolean;
+function InternalGenerateThumbnailOfImage(const aSourceFile, aThumbnailFile: String; const aMaxWidth, aMaxHeight: word; const aPng : boolean; out aError: String): boolean;
 var
   sourcePicture : TPicture;
-  thumbnail : {$IFDEF FPC} TPortableNetworkGraphic {$ELSE} TPngImage {$ENDIF};
+  thumbnailPNG : {$IFDEF FPC} TPortableNetworkGraphic {$ELSE} TPngImage {$ENDIF};
+  thumbnailJPG : TJPEGImage;
+  tmb : TCustomBitmap;
   rateWidth, rateHeight : Extended;
   r : TRect;
 begin
   Result := true;
   try
     sourcePicture := TPicture.Create;
-    {$IFDEF FPC}
-    thumbnail := TPortableNetworkGraphic.Create;
-    {$ELSE}
-    thumbnail := TPngImage.Create;
-    {$ENDIF}
+    thumbnailPNG := nil;
+    thumbnailJPG := nil;
+    if aPng then
+    begin
+      {$IFDEF FPC}
+      thumbnailPNG := TPortableNetworkGraphic.Create;
+      {$ELSE}
+      thumbnailPNG := TPngImage.Create;
+      {$ENDIF}
+    end
+    else
+      thumbnailJPG := TJPEGImage.Create;
     try
       sourcePicture.LoadFromFile(aSourceFile);
       rateWidth := aMaxWidth / sourcePicture.Width;
       rateHeight := aMaxHeight / sourcePicture.Height;
       if rateWidth > rateHeight then
         rateWidth := rateHeight;
-      thumbnail.SetSize(round(sourcePicture.Width * rateWidth), round(sourcePicture.Height * rateHeight));
-      thumbnail.Canvas.Brush.Color:= clWhite;
-      r := Rect(0, 0, thumbnail.Width, thumbnail.Height);
-      thumbnail.Canvas.FillRect(r);
+
+      if aPng then
+        tmb := thumbnailPNG
+      else
+        tmb := thumbnailJPG;
+
+      tmb.SetSize(round(sourcePicture.Width * rateWidth), round(sourcePicture.Height * rateHeight));
+      tmb.Canvas.Brush.Color:= clWhite;
+      r := Rect(0, 0, thumbnailPNG.Width, thumbnailPNG.Height);
+      tmb.Canvas.FillRect(r);
       {$IFDEF FPC}
-      thumbnail.Canvas.AntialiasingMode := amON;
+      tmb.Canvas.AntialiasingMode := amON;
       {$ENDIF}
-      thumbnail.Canvas.StretchDraw(r, sourcePicture.Graphic);
-      thumbnail.SaveToFile(aThumbnailFile);
+      tmb.Canvas.StretchDraw(r, sourcePicture.Graphic);
+      tmb.SaveToFile(aThumbnailFile);
     finally
       sourcePicture.Free;
-      thumbnail.Free;
+      FreeAndNil(thumbnailPNG);
+      FreeAndNil(thumbnailJPG);
     end;
   except
     on e: Exception do
@@ -500,6 +612,16 @@ begin
       Result := false;
     end;
   end;
+end;
+
+function GeneratePNGThumbnailOfImage(const aSourceFile, aThumbnailFile: String; const aMaxWidth, aMaxHeight: word;out aError: String): boolean;
+begin
+  Result := InternalGenerateThumbnailOfImage(aSourceFile, aThumbnailFile, aMaxWidth, aMaxHeight, true, aError);
+end;
+
+function GenerateJPGThumbnailOfImage(const aSourceFile, aThumbnailFile: String; const aMaxWidth, aMaxHeight: word;out aError: String): boolean;
+begin
+  Result := InternalGenerateThumbnailOfImage(aSourceFile, aThumbnailFile, aMaxWidth, aMaxHeight, false, aError);
 end;
 
 // https://stackoverflow.com/questions/20129758/algorithm-to-randomly-generate-a-color-palette-in-delphi
@@ -563,4 +685,10 @@ end;
 {$IFNDEF GUI}
 ** This unit should not be compiled in a console application **
 {$ENDIF}
+
+initialization
+  _TextExtendBitmap := nil;
+
+finalization
+  FreeAndNil(_TextExtendBitmap);
 end.

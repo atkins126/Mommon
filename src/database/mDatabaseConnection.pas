@@ -46,6 +46,7 @@ type
     procedure Close; override;
 
     procedure StartTransaction; override;
+    procedure EndTransaction; override;
     procedure Commit; override;
     procedure Rollback; override;
 
@@ -480,6 +481,7 @@ end;
 
 function TmAbstractDatabaseCommand.ParamByName(const aValue: string): TmQueryParameter;
 begin
+  TraceSQL(FSQL.Text);
   CreateImplementation;
   if PrepareIfNecessary then
   begin
@@ -737,6 +739,12 @@ procedure TmDatabaseConnection.StartTransaction;
 begin
   CreateImplementation;
   FImplementation.StartTransaction;
+end;
+
+procedure TmDatabaseConnection.EndTransaction;
+begin
+  CreateImplementation;
+  FImplementation.EndTransaction;
 end;
 
 procedure TmDatabaseConnection.Commit;

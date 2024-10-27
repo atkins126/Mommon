@@ -20,7 +20,9 @@ function GetPageType (const aWidth, aHeight : integer): TPDFPaperType;
 
 function ReduceSizeOfPdfWithPoppler (const aSourceFileName, aDestinationFileName : String; aProgress: ImProgress; out aReductionPerc : integer; out aError : String; const aResolution : integer = 72) : boolean;
 
-function ReduceSizeOfPdfWithGhostscript (const aSourceFileName, aDestinationFileName : String; aProgress: ImProgress; out aReductionPerc : integer; out aError : String; const aResolution : integer = 72) : boolean;
+function ReduceSizeOfPdfWithGhostscript (const aSourceFileName, aDestinationFileName : String; aProgress: ImProgress; out aReductionPerc : integer; out aError : String; const aResolution : integer = 72; const aConvertImagesToGrayScale : boolean = false) : boolean;
+
+function ConvertAllPagesToImages (const aSourceFileName, aDestinationFileName : String; aProgress: ImProgress; out aError: String): boolean;
 
 implementation
 
@@ -51,12 +53,12 @@ begin
   end;
 end;
 
-function ReduceSizeOfPdfWithGhostscript(const aSourceFileName, aDestinationFileName: String; aProgress: ImProgress; out aReductionPerc: integer; out aError: String; const aResolution: integer): boolean;
+function ReduceSizeOfPdfWithGhostscript(const aSourceFileName, aDestinationFileName: String; aProgress: ImProgress; out aReductionPerc: integer; out aError: String; const aResolution: integer; const aConvertImagesToGrayScale : boolean): boolean;
 var
   sizeSource, sizeDest : integer;
 begin
-  aProgress.Notify('Running optimizer...');
-  Result := TGhostscriptToolbox.CompressPdf(aSourceFileName, aDestinationFileName, aResolution);
+  aProgress.Notify(Format('Running optimizer on %s...', [ExtractFileName(aSourceFileName)]));
+  Result := TGhostscriptToolbox.CompressPdf(aSourceFileName, aDestinationFileName, aResolution, aConvertImagesToGrayScale);
   if not Result then
   begin
     aError:= TGhostscriptToolbox.GetLastError;
@@ -67,6 +69,80 @@ begin
     sizeDest := FileSize(aDestinationFileName);
 
     aReductionPerc:= max(0, trunc ((sizeSource - sizeDest) / (sizeSource/100)));
+  end;
+end;
+
+function ConvertAllPagesToImages(const aSourceFileName, aDestinationFileName: String; aProgress: ImProgress; out aError: String): boolean;
+var
+  tmpFolderPages: String;
+  files: TStringList;
+  pdfinfo: TPopplerPdfInfo;
+  i: integer;
+  pt: TPDFPaperType;
+  orientation, outOrientation: TConvertedPdfOrientation;
+  F: TSearchRec;
+begin
+  Result := false;
+
+  if not TPopplerToolbox.GetInfoFromPdf(aSourceFilename, pdfInfo) then
+  begin
+    aError := TPopplerToolbox.GetLastError;
+    exit;
+  end;
+
+  tmpFolderPages := GetUniqueTemporaryFolder;
+
+  if not DirectoryExists(tmpFolderPages) then
+    ForceDirectories(tmpFolderPages);
+  try
+    if Assigned(aProgress) then
+      aProgress.Notify('Extracting pages...');
+    if not TPopplerToolbox.ExtractPagesFromPdfAsPng(aSourceFileName, tmpFolderPages, 'page', 300) then
+    begin
+      aError := TPopplerToolbox.GetLastError;
+      exit;
+    end;
+
+    files := TStringList.Create;
+    try
+      try
+        if FindFirst(IncludeTrailingPathDelimiter(tmpFolderPages) + '*.png', faAnyFile, F) = 0 then
+        repeat
+          if (F.Attr and faDirectory = 0) then
+            files.Add(IncludeTrailingPathDelimiter(tmpFolderPages) + F.Name);
+        until FindNext(F) <> 0;
+      finally
+        SysUtils.FindClose(F);
+      end;
+
+      pt := GetPageType(pdfinfo.PageWidth, pdfinfo.PageHeight);
+      if pdfinfo.PageWidth > pdfinfo.PageHeight then
+        orientation:= cpoLandscape
+      else
+        orientation:= cpoPortrait;
+
+      for i := 0 to files.Count -1 do
+      begin
+        if not ConvertImageToPdf(files.Strings[i], ChangeFileExt(files.Strings[i], '.pdf'), true, true, orientation, outOrientation, pt, pdfinfo.PageWidth, pdfinfo.PageHeight) then
+        begin
+          aError:= Format('Unable to convert %s to a pdf', [files.Strings[i]]);
+          exit;
+        end;
+      end;
+
+      for i := 0 to files.Count -1 do
+        files.Strings[i] := ChangeFileExt(files.Strings[i], '.pdf');
+
+      Result := MergeFiles(files, tmpFolderPages, aDestinationFileName, aError);
+    finally
+      files.Free;
+    end;
+  finally
+    try
+      DeleteDirectory(tmpFolderPages, false);
+    except
+      // ignored
+    end;
   end;
 end;
 
@@ -158,7 +234,10 @@ begin
           pt := GetPageType(pagePdfInfo.PageWidth, pagePdfInfo.PageHeight);
 
           if not ConvertImageToPdf(tmpDestinationFile, ChangeFileExt(tmpDestinationFile, '.pdf'), true, true, orientation, outOrientation, pt, pagePdfInfo.PageWidth, pagePdfInfo.PageHeight) then
+          begin
+            aError:= Format('Unable to convert %s to a pdf', [tmpDestinationFile]);
             exit;
+          end;
 
           tmpDestinationFile:= ChangeFileExt(tmpDestinationFile, '.pdf');
 

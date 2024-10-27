@@ -98,7 +98,7 @@ implementation
 
 uses
 {$IFDEF FPC}
-  FileUtil, LazFileUtils,
+  FileUtil, LazFileUtils, (* if missing LazFileUtils, add LazUtils package to the requirements of the project*)
 {$ENDIF}
   mUtility, mMathUtility;
 
@@ -204,7 +204,7 @@ begin
   if FFileFolder = '' then
     FFileFolder := ExtractFileDir(FFileName);
   if FFileNameTemplate = '' then
-    FFileNameTemplate:= LazFileUtils.ExtractFileNameOnly(FFileName);
+    FFileNameTemplate:= ExtractFileName(FFileName);
   Result := IncludeTrailingPathDelimiter(FFileFolder) + mUtility.GetTimeStampForFileName(aDay, false) + FFileNameTemplate;
 end;
 
@@ -309,12 +309,12 @@ begin
 
       if FileExists(actualFileName) then
       begin
-        FFileStream := TFileStream.Create(actualFileName, fmOpenWrite);
+        FFileStream := TFileStream.Create(actualFileName, fmOpenWrite or fmShareDenyWrite);
         FFileStream.Seek(0, soFromEnd);
       end
       else
       begin
-        FFileStream := TFileStream.Create(actualFileName, fmCreate);
+        FFileStream := TFileStream.Create(actualFileName, fmCreate or fmShareDenyWrite);
         AddUTF8BOMToStream(FFileStream);
       end;
     end;

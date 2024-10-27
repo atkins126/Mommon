@@ -8,7 +8,7 @@
 //
 // @author Domenico Mammola (mimmo71@gmail.com - www.mammola.net)
 
-unit mQuickReadOnlyVirtualDataSet;
+unit mQuickReadOnlyVirtualDataSetProvider;
 
 {$IFDEF FPC}
 {$MODE DELPHI}
@@ -18,8 +18,8 @@ interface
 
 uses
   DB, Classes, contnrs, Variants, StrHashMap,
-  mVirtualDataSet, mDataProviderInterfaces, mSortConditions, mFilter, mIntList, mLog,
-  mVirtualDataSetJoins, mDataProviderFieldDefs, mVirtualDatasetFormulas, KAParser;
+  mDataProviderInterfaces, mSortConditions, mFilter, mIntList, mLog, mFields,
+  mVirtualDataSetJoins, mDataProviderFieldDefs, mVirtualDatasetFormulas, KAParser, mVirtualDatasetProvider;
 
 const
   KEY_FIELD_NAME = '_KEY';
@@ -63,7 +63,9 @@ type
     procedure InsertRecord (const AIndex : integer; AModifiedFields : TList); override;
     function GetRecordCount : integer; override;
     procedure FillFieldDefsOfDataset(aFieldDefs : TFieldDefs; const aReadOnly: boolean); override;
+    procedure FillFields(aFields : TmFields); override;
     procedure SetDefaultVisibilityOfFields (aFields : TFields); override;
+    function GetKeyFieldName: String;
 
     procedure Clear;
     function Refresh (const aDoSort, aDoFilter : boolean): boolean; override;
@@ -362,6 +364,36 @@ begin
   end;
 end;
 
+procedure TReadOnlyVirtualDatasetProvider.FillFields(aFields: TmFields);
+var
+  k, i : integer;
+  CurrentField : TmVirtualFieldDef;
+  CurrentJoin : TmBuiltInJoin;
+  tmpField : TmField;
+begin
+  inherited FillFields(aFields);
+
+  FFieldsFromJoin.Clear;
+  for k := 0 to FBuiltInJoins.Count - 1 do
+  begin
+    CurrentJoin := FBuiltInJoins.Get(k);
+    for i := 0 to CurrentJoin.VirtualFieldDefs.Count -1 do
+    begin
+      CurrentField := CurrentJoin.VirtualFieldDefs[i];
+      tmpField := aFields.Add;
+      Self.FillField(CurrentField, CurrentJoin.Prefix, tmpField);
+      FFieldsFromJoin.Add(tmpField.FieldName);
+    end;
+  end;
+
+  for k := 0 to FFormulaFields.Count -1 do
+  begin
+    tmpField := aFields.Add;
+    tmpField.FieldName:= FFormulaFields.Get(k).Name;
+    tmpField.DataType:= FromTmFormulaFieldTypeToTFieldType(FFormulaFields.Get(k).DataType);
+  end;
+end;
+
 procedure TReadOnlyVirtualDatasetProvider.SetDefaultVisibilityOfFields(aFields: TFields);
 var
   i : integer;
@@ -374,6 +406,11 @@ begin
         aFields[i].Visible:= false;
     end;
   end;
+end;
+
+function TReadOnlyVirtualDatasetProvider.GetKeyFieldName: String;
+begin
+  Result := FIDataProvider.GetKeyFieldName;
 end;
 
 procedure TReadOnlyVirtualDatasetProvider.Clear;

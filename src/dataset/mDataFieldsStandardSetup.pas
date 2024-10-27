@@ -8,7 +8,7 @@
 //
 // @author Domenico Mammola (mimmo71@gmail.com - www.mammola.net)
 
-unit mDatasetStandardSetup;
+unit mDataFieldsStandardSetup;
 
 {$IFDEF FPC}
   {$MODE DELPHI}
@@ -17,17 +17,19 @@ unit mDatasetStandardSetup;
 interface
 
 uses
-  DB;
+  DB,
+  mFields;
 
 
 function GenerateDisplayLabel(aSourceString : String) : String;
-procedure ApplyStandardSettingsToFields (aDataset : TDataset; aStandardFloatFormat : String);
+procedure ApplyStandardSettingsToFields (aDataset : TDataset; aStandardFloatFormat : String; const aPreserveDisplayFloatFormatIfAny : boolean = false); overload;
+procedure ApplyStandardSettingsToFields (aFields : TmFields; aStandardFloatFormat : String; const aPreserveDisplayFloatFormatIfAny : boolean = false); overload;
 
 implementation
 
 uses
   SysUtils, StrUtils,
-  mFields;
+  mDataFieldsUtility;
 
 function GenerateDisplayLabel(aSourceString: String): String;
 var
@@ -75,7 +77,7 @@ begin
   *)
 end;
 
-procedure ApplyStandardSettingsToFields(aDataset: TDataset; aStandardFloatFormat : String);
+procedure ApplyStandardSettingsToFields(aDataset: TDataset; aStandardFloatFormat : String; const aPreserveDisplayFloatFormatIfAny : boolean = false);
 var
   i : integer;
 begin
@@ -83,8 +85,11 @@ begin
   begin
     if aDataset.Fields[i] is TFloatField then
     begin
-      (aDataset.Fields[i] as TFloatField).EditFormat:= aStandardFloatFormat;
-      (aDataset.Fields[i] as TFloatField).DisplayFormat:= aStandardFloatFormat;
+      if (not aPreserveDisplayFloatFormatIfAny) or (aPreserveDisplayFloatFormatIfAny and ((aDataset.Fields[i] as TFloatField).EditFormat = '')) then
+      begin
+        (aDataset.Fields[i] as TFloatField).EditFormat:= aStandardFloatFormat;
+        (aDataset.Fields[i] as TFloatField).DisplayFormat:= aStandardFloatFormat;
+      end;
     end;
 
     if aDataset.Fields[i].DisplayLabel <> '' then
@@ -95,7 +100,31 @@ begin
     if IsSystemField(aDataset.Fields[i].FieldName) then
       aDataset.Fields[i].Visible:= false;
   end;
+end;
 
+procedure ApplyStandardSettingsToFields(aFields: TmFields; aStandardFloatFormat: String; const aPreserveDisplayFloatFormatIfAny : boolean = false);
+var
+  i : integer;
+begin
+  for i := 0 to aFields.Count - 1 do
+  begin
+    if FieldTypeIsFloat(aFields.Get(i).DataType) then
+    begin
+      if (not aPreserveDisplayFloatFormatIfAny) or (aPreserveDisplayFloatFormatIfAny and (aFields.Get(i).DisplayFormat = '')) then
+      begin
+        aFields.Get(i).EditFormat:= aStandardFloatFormat;
+        aFields.Get(i).DisplayFormat := aStandardFloatFormat;
+      end;
+    end;
+
+    if aFields.Get(i).DisplayLabel <> '' then
+      aFields.Get(i).DisplayLabel := GenerateDisplayLabel(aFields.Get(i).DisplayLabel)
+    else
+      aFields.Get(i).DisplayLabel := GenerateDisplayLabel(aFields.Get(i).FieldName);
+
+    if IsSystemField(aFields.Get(i).FieldName) then
+      aFields.Get(i).Visible:= false;
+  end;
 end;
 
 end.

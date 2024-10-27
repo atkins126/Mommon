@@ -25,6 +25,8 @@ type
 
   TmSummaryValueType = (svtDouble, svtInteger, svtString, svtDate, svtDateTime);
 
+  TmSummaryDefinition = class;
+
   { TmSummaryScreenValue }
 
   TmSummaryScreenValue = class
@@ -32,12 +34,15 @@ type
     FFormattedValue: string;
     FRawValue: variant;
     FDataType: TmSummaryValueType;
+    FDefinition: TmSummaryDefinition;
   public
     constructor Create;
+    destructor Destroy; override;
 
     property FormattedValue: string read FFormattedValue write FFormattedValue;
     property RawValue: variant read FRawValue write FRawValue;
     property DataType: TmSummaryValueType read FDataType write FDataType;
+    property Definition: TmSummaryDefinition read FDefinition;
   end;
 
   { TmSummaryScreenValues }
@@ -157,56 +162,14 @@ type
     function FindByDefinition(const aDefinition : TmSummaryDefinition): TmSummaryValue;
   end;
 
-  function TmSummaryOperatorToString (const aOperator : TmSummaryOperator) : String;
 
-  function FieldTypeIsInteger(const aFieldType : TFieldType): boolean;
-  function FieldTypeIsTime(const aFieldType : TFieldType): boolean;
-  function FieldTypeIsDate(const aFieldType : TFieldType): boolean;
-  function FieldTypeIsDateTime(const aFieldType : TFieldType): boolean;
-  function FieldTypeIsFloat(const aFieldType : TFieldType) : boolean;
-  function FieldTypeIsPascalDouble(const aFieldType : TFieldType): boolean;
-  function FieldTypeIsString(const aFieldType : TFieldType) : boolean;
+  function TmSummaryOperatorToString (const aOperator : TmSummaryOperator) : String;
 
 implementation
 
 uses
-  variants;
-
-function FieldTypeIsInteger(const aFieldType : TFieldType): boolean;
-begin
-  Result := aFieldType in [ftInteger, ftSmallint, ftLargeint];
-end;
-
-function FieldTypeIsTime(const aFieldType : TFieldType): boolean;
-begin
-  Result := aFieldType = ftTime;
-end;
-
-function FieldTypeIsDate(const aFieldType : TFieldType): boolean;
-begin
-  Result := aFieldType = ftDate;
-end;
-
-function FieldTypeIsDateTime(const aFieldType : TFieldType): boolean;
-begin
-  Result := (aFieldType in [ftDateTime, ftTimeStamp]);
-end;
-
-function FieldTypeIsFloat(const aFieldType : TFieldType) : boolean;
-begin
-  Result := aFieldType in [ftFloat, ftFMTBcd, ftCurrency];
-end;
-
-function FieldTypeIsPascalDouble(const aFieldType : TFieldType): boolean;
-begin
-  Result := FieldTypeIsFloat(aFieldType) or FieldTypeIsDate(aFieldType) or FieldTypeIsTime(aFieldType) or FieldTypeIsDateTime(aFieldType);
-end;
-
-function FieldTypeIsString(const aFieldType : TFieldType) : boolean;
-begin
-  Result := aFieldType in [ftString, ftWideString, ftMemo, ftWideMemo, ftGuid];
-end;
-
+  variants,
+  mDataFieldsUtility;
 
 function TmSummaryOperatorToString(const aOperator: TmSummaryOperator): String;
 begin
@@ -262,6 +225,13 @@ constructor TmSummaryScreenValue.Create;
 begin
   FFormattedValue:= '';
   FRawValue:= null;
+  FDefinition:= TmSummaryDefinition.Create;
+end;
+
+destructor TmSummaryScreenValue.Destroy;
+begin
+  FDefinition.Free;
+  inherited Destroy;
 end;
 
 { TmSummaryDefinition }

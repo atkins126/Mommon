@@ -50,9 +50,19 @@ type
     function Add : TSerializedField;
   end;
 
-procedure GetSerializedFields (const aDataProvider : IVDDataProvider; aFields : TSerializedFields; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention);
+  TAllowFieldInclusionFunction = function (const aFieldName : String) : boolean;
+  TSerializeDateValueFunction = function (const aValue : TDate): String;
+  TSerializeDateTimeValueFunction = function (const aValue : TDateTime): String;
+  TSerializeTimeValueFunction = function (const aValue : {$IFDEF UNIX}TDateTime{$ELSE}TTime{$ENDIF}): String;
+
+procedure GetSerializedFields (const aDataProvider : IVDDataProvider; aFields : TSerializedFields; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention; const aAllowedFieldCheckFunction : TAllowFieldInclusionFunction); overload;
+procedure GetSerializedFields (const aFieldDefs : TmVirtualFieldDefs; aFields : TSerializedFields; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention; const aAllowedFieldCheckFunction : TAllowFieldInclusionFunction); overload;
 
 implementation
+
+uses
+  SysUtils,
+  mFields;
 
 { TSerializedField }
 
@@ -92,25 +102,33 @@ begin
   FList.Add(Result);
 end;
 
-procedure GetSerializedFields (const aDataProvider : IVDDataProvider; aFields : TSerializedFields; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention);
+procedure GetSerializedFields (const aDataProvider : IVDDataProvider; aFields : TSerializedFields; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention; const aAllowedFieldCheckFunction : TAllowFieldInclusionFunction);
 var
   virtualFieldDefs : TmVirtualFieldDefs;
-  i : integer;
-  newField : TSerializedField;
 begin
   virtualFieldDefs := TmVirtualFieldDefs.Create;
   try
     aDataProvider.FillVirtualFieldDefs(virtualFieldDefs, '');
-    for i := 0 to virtualFieldDefs.Count - 1 do
-    begin
-      newField := aFields.Add;
-      newField.OriginalFieldName:= virtualFieldDefs.VirtualFieldDefs[i].Name;
-      newField.SerializedFieldName:= ConvertNamingConvention(newField.OriginalFieldName, aSourceNamingConvention, aDestinationNamingConvention);
-      newField.DataType:= virtualFieldDefs.VirtualFieldDefs[i].DataType;
-    end;
-
+    GetSerializedFields(virtualFieldDefs, aFields, aSourceNamingConvention, aDestinationNamingConvention, aAllowedFieldCheckFunction);
   finally
     virtualFieldDefs.Free;
+  end;
+end;
+
+procedure GetSerializedFields(const aFieldDefs: TmVirtualFieldDefs; aFields: TSerializedFields; const aSourceNamingConvention, aDestinationNamingConvention: TmNamingConvention; const aAllowedFieldCheckFunction : TAllowFieldInclusionFunction);
+var
+  i : integer;
+  newField : TSerializedField;
+begin
+  for i := 0 to aFieldDefs.Count - 1 do
+  begin
+    if Assigned(aAllowedFieldCheckFunction) and (not aAllowedFieldCheckFunction(aFieldDefs.VirtualFieldDefs[i].Name)) then
+      continue;
+
+    newField := aFields.Add;
+    newField.OriginalFieldName:= aFieldDefs.VirtualFieldDefs[i].Name;
+    newField.SerializedFieldName:= ConvertNamingConvention(StringReplace(newField.OriginalFieldName, SEPARATOR_FIELDS_FROM_INTERNAL_REFERENCE, '_', [rfReplaceAll]), aSourceNamingConvention, aDestinationNamingConvention);
+    newField.DataType := aFieldDefs.VirtualFieldDefs[i].DataType;
   end;
 end;
 

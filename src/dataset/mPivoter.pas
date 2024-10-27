@@ -19,7 +19,7 @@ interface
 uses
   contnrs, db, variants, Classes,
   mDataProviderInterfaces,
-  mIntList, mMaps, mSummary, mNullables, mQuickReadOnlyVirtualDataSet;
+  mIntList, mMaps, mSummary, mNullables, mQuickReadOnlyVirtualDataSetProvider;
 
 type
 
@@ -263,7 +263,7 @@ implementation
 
 uses
   sysutils, dateutils,
-  mDateTimeUtility, mUtility;
+  mDateTimeUtility, mUtility, mDataFieldsUtility;
 
 function TmGroupByOperationKindToString(const aValue: TmGroupByOperationKind): String;
 begin

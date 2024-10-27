@@ -17,15 +17,24 @@ interface
 {$ENDIF}
 
 uses
-  mDataProviderInterfaces, mNamingConventions;
+  mDataProviderInterfaces, mNamingConventions, mDataProviderSerializerClasses;
 
-function SerializeDataProviderToJson (const aDataProvider : IVDDataProvider; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention): String;
+
+function SerializeDataProviderToJson (const aDataProvider : IVDDataProvider; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention;
+  const aSerializeDateFunction : TSerializeDateValueFunction; const aSerializeTimeFunction : TSerializeTimeValueFunction;
+  const aSerializeDateTimeFunction : TSerializeDateTimeValueFunction; const aAllowedFieldCheckFunction : TAllowFieldInclusionFunction = nil): String;
+function SerializeDatumToJson(const aDatum : IVDDatum; const aFields : TSerializedFields;
+  const aSerializeDateFunction : TSerializeDateValueFunction; const aSerializeTimeFunction : TSerializeTimeValueFunction;
+  const aSerializeDateTimeFunction : TSerializeDateTimeValueFunction): String; overload;
+function SerializeDatumToJson(const aDatum : IVDDatum; const aDataProvider : IVDDataProvider; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention;
+  const aSerializeDateFunction : TSerializeDateValueFunction; const aSerializeTimeFunction : TSerializeTimeValueFunction;
+  const aSerializeDateTimeFunction : TSerializeDateTimeValueFunction; const aAllowedFieldCheckFunction : TAllowFieldInclusionFunction): String; overload;
 
 implementation
 
 uses
   Classes, Contnrs, SysUtils, Variants,
-  mDataProviderFieldDefs, mUtility, mDataProviderSerializerClasses;
+  mDataProviderFieldDefs, mUtility;
 
 //https://restfulapi.net/json-data-types/
 
@@ -35,12 +44,11 @@ uses
 //  ISO8601FormatExtendedUTC_Time='"T"hh":"mm":"ss"Z"';
 
 
-function SerializeDataProviderToJson(const aDataProvider: IVDDataProvider; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention): String;
+function SerializeDataProviderToJson(const aDataProvider: IVDDataProvider; const aSourceNamingConvention, aDestinationNamingConvention : TmNamingConvention; const aSerializeDateFunction : TSerializeDateValueFunction; const aSerializeTimeFunction : TSerializeTimeValueFunction;
+  const aSerializeDateTimeFunction : TSerializeDateTimeValueFunction; const aAllowedFieldCheckFunction : TAllowFieldInclusionFunction = nil): String;
 var
-  i, k : integer;
-  curDatum : IVDDatum;
+  i : integer;
   fields : TSerializedFields;
-  value : Variant;
 begin
   Result := '[';
 
@@ -50,7 +58,7 @@ begin
   begin
     fields := TSerializedFields.Create;
     try
-      GetSerializedFields(aDataProvider, fields, aSourceNamingConvention, aDestinationNamingConvention);
+      GetSerializedFields(aDataProvider, fields, aSourceNamingConvention, aDestinationNamingConvention, aAllowedFieldCheckFunction);
 
       for i := 0 to aDataProvider.Count - 1 do
       begin
@@ -58,30 +66,7 @@ begin
           Result := Result + ',{'
         else
           Result := Result + '{';
-        curDatum := aDataProvider.GetDatum(i);
-        for k := 0 to fields.Count - 1 do
-        begin
-          if k > 0 then
-            Result := Result + ',';
-
-          Result := Result + '"' + fields.Get(k).SerializedFieldName + '":';
-          value := curDatum.GetPropertyByFieldName(fields.Get(k).OriginalFieldName);
-          if VarIsNull(value) then
-            Result := Result + 'null'
-          else
-          begin
-            case fields.Get(k).DataType of
-              vftInteger : Result := Result + IntToStr(value);
-              vftBoolean : if value then Result := Result + 'true' else Result := Result + 'false';
-              vftFloat, vftCurrency : Result := Result + FormatFloat('#.#', value);
-              vftDate : Result := Result + '"' + DateToJsonString(VarToDateTime(value)) + '"';
-              vftTime : Result := Result + '"' + TimeToJsonString(VarToDateTime(value)) + '"';
-              vftDateTime, vftTimeStamp : Result := Result + '"' + DateTimeToJsonString(VarToDateTime(value)) + '"';
-            else
-              Result := Result + '"' + EscapeStringValue(VarToStr(value), 'json') + '"';
-            end;
-          end;
-        end;
+        Result := Result + SerializeDatumToJson (aDataProvider.GetDatum(i), fields, aSerializeDateFunction, aSerializeTimeFunction, aSerializeDateTimeFunction);
         Result := Result + '}';
       end;
       Result := Result + ']';
@@ -89,6 +74,53 @@ begin
     finally
       fields.Free;
     end;
+  end;
+end;
+
+function SerializeDatumToJson(const aDatum: IVDDatum; const aFields : TSerializedFields; const aSerializeDateFunction : TSerializeDateValueFunction; const aSerializeTimeFunction : TSerializeTimeValueFunction;
+  const aSerializeDateTimeFunction : TSerializeDateTimeValueFunction): String;
+var
+  k : integer;
+  value : Variant;
+begin
+  Result := '';
+  for k := 0 to aFields.Count - 1 do
+  begin
+    if k > 0 then
+      Result := Result + ',';
+
+    Result := Result + '"' + aFields.Get(k).SerializedFieldName + '":';
+    value := aDatum.GetPropertyByFieldName(aFields.Get(k).OriginalFieldName);
+    if VarIsNull(value) then
+      Result := Result + 'null'
+    else
+    begin
+      case aFields.Get(k).DataType of
+        vftInteger : Result := Result + IntToStr(value);
+        vftBoolean : if value then Result := Result + 'true' else Result := Result + 'false';
+        vftFloat, vftCurrency : Result := Result + FormatFloat('#.#', value);
+        vftDate : if Assigned(aSerializeDateFunction) then Result := Result + '"' + aSerializeDateFunction(VarToDateTime(value)) + '"' else Result := Result + '"' + DateToJsonString(VarToDateTime(value)) + '"';
+        vftTime : if Assigned(aSerializeTimeFunction) then Result := Result + '"' + aSerializeTimeFunction(VarToDateTime(value)) + '"' else Result := Result + '"' + TimeToJsonString(VarToDateTime(value)) + '"';
+        vftDateTime, vftTimeStamp : if Assigned(aSerializeDateTimeFunction) then Result := Result + '"' + aSerializeDateTimeFunction(VarToDateTime(value)) + '"' else Result := Result + '"' + DateTimeToJsonString(VarToDateTime(value)) + '"';
+      else
+        Result := Result + '"' + EscapeStringValue(VarToStr(value), 'json') + '"';
+      end;
+    end;
+  end;
+end;
+
+function SerializeDatumToJson(const aDatum: IVDDatum; const aDataProvider: IVDDataProvider; const aSourceNamingConvention, aDestinationNamingConvention: TmNamingConvention;
+  const aSerializeDateFunction : TSerializeDateValueFunction; const aSerializeTimeFunction : TSerializeTimeValueFunction;
+  const aSerializeDateTimeFunction : TSerializeDateTimeValueFunction; const aAllowedFieldCheckFunction : TAllowFieldInclusionFunction): String;
+var
+  fields : TSerializedFields;
+begin
+  fields := TSerializedFields.Create;
+  try
+    GetSerializedFields(aDataProvider, fields, aSourceNamingConvention, aDestinationNamingConvention, aAllowedFieldCheckFunction);
+    Result := SerializeDatumToJson(aDatum, fields, aSerializeDateFunction, aSerializeTimeFunction, aSerializeDateTimeFunction);
+  finally
+    fields.Free;
   end;
 end;
 
